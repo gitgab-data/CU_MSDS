@@ -1,0 +1,371 @@
+---
+title: "DSF_Project_1"
+author: "Gabrielle Melli"
+date: "7/16/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Overview 
+
+The data for this project is a dataset from data.gov called "NYPD Shooting Incident Data (Historic)". The source of the data is at the url below:
+
+https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD
+
+## Load Packages
+```{r packages}
+library(data.table)
+library(tidyverse)
+```
+
+
+## A. Load Data
+
+Step 1 of this project is to load the public dataset into RStudio. We will use the read.csv() function that is part of the built in 'utils' package in R. We will read in the csv from the download link, rather than downloading the data to a csv locally, that way the data can continue to be updated on the website and keep our project current, and also so that it is accessible to reproduce from another computer.
+
+```{r load_data}
+shooting_data <- read.csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD")
+```
+
+## B. Tidy and Transform Data
+
+We want to understand what the structure of our dataset looks like, change the column types if necessary, and remove any data we may not need. The str() function is also from the 'utils' package. 
+
+```{r structure}
+str(shooting_data)
+```
+
+The str() function shows the column types. The date and time columns should be date and time objects rather than strings. Age group columns should be transformed into ordered factors to represent the linear relationship of ages. The sex, race, location description, and borough columns can also be factored, without ordering. The statistical murder flag column can be changed to logical TRUE and FALSE, rather than be left as strings. 
+
+Inferring from the lecture video, I am assuming that we will not be needing coordinates and latitude and longitude points for this project, so I will remove those columns.
+
+It looks like there is a lot of information missing from the perp columns. If there were an additional table with references to these incidents with more thorough perp data, I would join those tables together to be more complete. Another consideration would be to remove the rows where information about the perp is incomplete, but for analysis purposes, it would be interesting to understand if there are trends in the data related to incomplete perp information. I will fill the missing values in with "UNKNOWN" for PERP_AGE_GROUP and PERP_RACE columns, and with "U" in PERP_SEX, to match the other rows where this data is also unknown.
+
+I am more familiar using the 'data.table' package than the 'tidyr' package, so I will be transforming my data in data.table form, which has similar logic to SQL. 
+
+#### 1. Set the data frame to data.table 
+
+```{r data_table}
+shooting_data_dt <- setDT(shooting_data)
+```
+
+#### 2. Remove coordinate columns
+
+```{r remove_cols}
+shooting_data_dt <- shooting_data_dt[
+  ,-c(
+    "X_COORD_CD"
+    ,"Y_COORD_CD"
+    ,"Latitude"
+    ,"Longitude"
+    ,"Lon_Lat"
+    )
+  ,with=F
+]
+```
+
+#### 3. Change and create date column types
+
+```{r cols_to_dates}
+shooting_data_dt[
+  ,OCCUR_DATE_TIME:=as.POSIXct(
+    x=str_c(
+      OCCUR_DATE
+      ," "
+      ,OCCUR_TIME
+    )
+    ,format = "%m/%d/%Y %H:%M:%S"
+  )
+]
+shooting_data_dt[,OCCUR_DATE:=as.POSIXct(OCCUR_DATE,format="%m/%d/%Y")]
+shooting_data_dt[,OCCUR_HOUR:=hour(OCCUR_DATE_TIME)]
+```
+
+#### 4. Factor perp age column
+
+```{r factor_perp_ages}
+# The first step here is to identify what the factor levels should be for the column
+unique(shooting_data_dt$PERP_AGE_GROUP)
+
+# We can see in this output that there are a few rows with un-believable age values, namely 1020, 940, and 224. These values, along with the empty values, will be updated to "UNKNOWN", as there is not information on the original website to describe what these outliers are.
+
+shooting_data_dt[PERP_AGE_GROUP %in% c("","1020","940","224"),PERP_AGE_GROUP:="UNKNOWN"]
+ 
+# Set the factor levels of the new age values 
+age_levels <- c("<18","18-24","25-44","45-64","65+","UNKNOWN")
+
+# Factor the PERP_AGE_GROUP column
+shooting_data_dt[,PERP_AGE_GROUP:=factor(PERP_AGE_GROUP,levels=age_levels,ordered=T)]
+
+# Check that the column has factors now
+str(shooting_data_dt$PERP_AGE_GROUP)
+
+# Success!
+```
+
+#### 5. Factor victim age column
+
+```{r factor_victim_ages}
+# The first step here is to identify what the factor levels should be for the column
+unique(shooting_data_dt$VIC_AGE_GROUP)
+
+# We can see in this output that there are no unexpected values, and no missing values. We will leave the data as is in this column, and use the same levels as defined above.
+
+# Factor the PERP_AGE_GROUP column
+shooting_data_dt[,VIC_AGE_GROUP:=factor(VIC_AGE_GROUP,levels=age_levels,ordered=T)]
+
+# Check that the column has factors now
+str(shooting_data_dt$VIC_AGE_GROUP)
+
+# Success!
+```
+
+#### 6. Factor perp race column
+
+```{r factor_perp_race}
+# Identify which factor levels should exist for the column
+unique(shooting_data_dt$PERP_RACE)
+
+# As occurred with age, there is missing data in this column. We will update these values to "UNKNOWN"
+
+shooting_data_dt[PERP_RACE=="",PERP_RACE:="UNKNOWN"]
+
+# Because the factors will be unordered, we can factor the PERP_RACE column without specifying the levels
+
+shooting_data_dt[,PERP_RACE:=factor(PERP_RACE)]
+
+# Sanity check perp race factors
+
+str(shooting_data_dt$PERP_RACE)
+
+# Success!
+
+```
+
+#### 7. Factor victim race column
+
+```{r factor_victim_race}
+# Identify which factor levels should exist for the column
+unique(shooting_data_dt$VIC_RACE)
+
+# None of the data here is a missing value, so we will skip to the factor step. As before, because the factors will be unordered, we can factor the VIC_RACE column without specifying the levels
+
+shooting_data_dt[,VIC_RACE:=factor(VIC_RACE)]
+
+# Sanity check victim race factors
+
+str(shooting_data_dt$VIC_RACE)
+
+# Success!
+
+```
+
+#### 8. Factor perp sex
+
+```{r factor_per_sex}
+# Identify which factor levels should exist for the column
+unique(shooting_data_dt$PERP_SEX)
+
+# As occurred with age, there is missing data in this column. We will update these values to "U" to match the other unknown values
+
+shooting_data_dt[PERP_SEX=="",PERP_SEX:="U"]
+
+# Because the factors will be unordered, we can factor the PERP_SEX column without specifying the levels
+
+shooting_data_dt[,PERP_SEX:=factor(PERP_SEX)]
+
+# Sanity check perp race factors
+
+str(shooting_data_dt$PERP_SEX)
+
+# Success!
+
+```
+
+#### 9. Factor victim sex
+
+```{r factor_victim_sex}
+# Identify which factor levels should exist for the column
+unique(shooting_data_dt$VIC_SEX)
+
+# None of the data here is a missing value, so we will skip to the factor step. As before, because the factors will be unordered, we can factor the VIC_SEX column without specifying the levels
+
+shooting_data_dt[,VIC_SEX:=factor(VIC_SEX)]
+
+# Sanity check victim race factors
+
+str(shooting_data_dt$VIC_SEX)
+
+# Success!
+
+```
+
+#### 10. Factor BORO column
+
+```{r factor_boro}
+# Identify which factor levels should exist for the column
+unique(shooting_data_dt$BORO)
+
+# None of the data has a missing value, so we will factor on the original value of the columns
+shooting_data_dt[,BORO:=factor(BORO)]
+
+# Sanity check
+
+str(shooting_data_dt$BORO)
+
+# Success!
+
+```
+
+#### 11. Update the statistical murder flag to be logical
+
+```{r logical_stat}
+# A new column has to be created because the values in a column must always  be of the same class, so we would get an error after the first line
+
+shooting_data_dt[STATISTICAL_MURDER_FLAG=="true",STATISTICAL_MURDER_FLAG_LOG:=T]
+shooting_data_dt[STATISTICAL_MURDER_FLAG=="false",STATISTICAL_MURDER_FLAG_LOG:=F]
+
+# Sanity check
+
+str(shooting_data_dt$STATISTICAL_MURDER_FLAG_LOG)
+
+#Success!
+
+```
+
+#### 12. Factor the location description
+
+```{r factor_location}
+# As before, we will factor this column without ordering the factors. We will start by checking for missing values and assigning them "UNKNOWN".
+
+unique(shooting_data_dt$LOCATION_DESC)
+shooting_data_dt[LOCATION_DESC=="",LOCATION_DESC:="UNKNOWN"]
+
+# Then, we will factor the column
+shooting_data_dt[,LOCATION_DESC:=factor(LOCATION_DESC)]
+
+# Sanity check
+
+str(shooting_data_dt$LOCATION_DESC)
+
+# Success!
+
+```
+
+#### 13. Table summary as a sanity check
+
+We can see that the changes we made above have been put into effect! We still have 2 values of NA in the JURISDICTION_CODE column. This column may have no meaning in our future analysis, and thus, I will not make any changes to this column. 
+
+```{r summary}
+summary(shooting_data_dt)
+```
+
+## C. Visualize Data
+
+During the data cleaning process, I was curious about multiple questions. 
+
+1. Is there a relationship between shootings per year and borough?
+2. Is there a correlation between time of day and number of shootings?
+3. How many shootings result in death per year? Is there a trend?
+
+To answer these questions, I will need to add additional columns to my data.table above. I will need to create smaller data.tables from my data above to count occurrences by group. 
+
+```{r add_time_of_day}
+shooting_data_dt[OCCUR_HOUR<6,OCCUR_CAT:="PREDAWN MORNING"]
+shooting_data_dt[OCCUR_HOUR>=6 & OCCUR_HOUR<12,OCCUR_CAT:="MORNING"]
+shooting_data_dt[OCCUR_HOUR>=12 & OCCUR_HOUR<17,OCCUR_CAT:="AFTERNOON"]
+shooting_data_dt[OCCUR_HOUR>=17 & OCCUR_HOUR<21,OCCUR_CAT:="EVENING"]
+shooting_data_dt[OCCUR_HOUR>=21 & OCCUR_HOUR<24,OCCUR_CAT:="NIGHT"]
+
+time_levels <- c("PREDAWN MORNING","MORNING","AFTERNOON","EVENING","NIGHT")
+
+shooting_data_dt[,OCCUR_CAT:=factor(OCCUR_CAT,levels=time_levels,ordered = T)]
+
+shooting_data_dt[,MURDER:=0]
+shooting_data_dt[STATISTICAL_MURDER_FLAG_LOG==T,MURDER:=1]
+```
+
+```{r group_by}
+shootings_per_borough <- shooting_data_dt[,list(count=.N),by=list(BORO,year(OCCUR_DATE))]
+
+shootings_by_time_of_day <- shooting_data_dt[,list(count=.N),by=list(OCCUR_CAT)]
+
+shootings_vs_murder <- shooting_data_dt[,list(shooting=.N,murder=sum(MURDER)),by=list(year(OCCUR_DATE))]
+```
+
+Now we plot the data we are interested in seeing.
+
+#### Shootings per Borough
+
+```{r borough_plot}
+boro_plot <- ggplot(data=shootings_per_borough,aes(x=year,y=count,color=BORO)) + geom_line() + geom_point()
+
+boro_plot
+```
+
+From the plot, we can see that the highest percentage of shootings occur in Brooklyn per year, and the lowest percentage of shootings occur in Staten Island, and that no borough ever surpasses another in any given year. Curiously, all boroughs had a dip in shootings between 2015 and 2019, and a sharp rise of shootings between 2019 and 2020. 
+
+#### Shootings by Time of Day
+
+```{r time_of_day_plot}
+tod_plot <- ggplot(data=shootings_by_time_of_day,aes(x=OCCUR_CAT,y=count,fill=OCCUR_CAT))+geom_col()
+
+tod_plot
+```
+
+From this plot, it is clear that most shootings happen in the predawn morning hours, which is any time between midnight and 6 am, and the least amount of shootings occur between 6 am and noon.
+
+#### Shootings vs Murders per Year
+
+```{r shoot_vs_murder}
+murder_plot <- ggplot(data=shootings_vs_murder) + geom_line(aes(x=year,y=shooting,color="shooting")) + geom_line(aes(x=year,y=murder,color="murder"))
+
+murder_plot
+```
+
+This plot illustrates that the number of shootings that result in murder are a small percentage. However, where we see a large dip in shootings between 2015 and 2019, we see a more stagnant level of murders, indicating that there is less fluctuation in the occurrence of murders than in the occurrence of shootings. 
+
+
+Additional questions that are worth investigating as a result of these visualizations:
+
+1. What is the correlation between perp age group and time of day of shooting? What about victim age group and time of day?
+
+2. Is there a variable in the data that correlates with the dip in shootings between 2015 and 2019? 
+
+3. What is the demographic makeup of the shootings that occur in each borough? 
+
+## D. Model
+
+Does time of day have a linear relationship of whether or not the shooting results in a murder? We will use a linear model to determine whether or not murder is linearly predictable by hour of the day.
+
+```{r model}
+murder_per_day_hour <- shooting_data_dt[,list(shootings=.N,murder=sum(MURDER)),by=OCCUR_HOUR]
+
+
+mod <- lm(murder ~ OCCUR_HOUR, data=murder_per_day_hour)
+summary(mod)
+```
+
+Here we add the prediction to the transformed data.table:
+```{r add_pred}
+murder_per_day_hour[,prediction:=predict(mod)]
+```
+
+And here, we plot our results:
+```{r plot_model}
+pred_plot <- ggplot(data=murder_per_day_hour) + geom_point(aes(x=OCCUR_HOUR,y=murder,color="actuals")) + geom_point(aes(x=OCCUR_HOUR,y=prediction,color="predictions"))
+
+pred_plot
+```
+
+Based on the results of the model, we can see that a linear model is not adequate in predicting whether time of day determines whether the shooting will result in murder. However, based on the pattern, it seems like maybe a polynomial model may fit better.
+
+## E. Bias Identification
+
+This project was a thorough introduction into data cleaning, visualization, and analysis of raw data sourced from the internet. While the investigation was high level, it was interesting to see how raw data is not always complete, clean, or well-formatted. 
+
+Within this dataset, there is not much information about either perp or victim beyond static demographics like age, sex, and race. Without further information in about these individuals, like home address, intoxication status, history of violent and non-violent offenses, education level, number of police officers employed and on-duty in that area during different times of the day, relationship between perp and victim, motive, and more, it would be easy to introduce bias into the analysis. I avoided overtly demographic-based analyses, because my personal bias wanted to avoid drawing conclusions based on race or gender about gun violence in New York City. I am not familiar with the different boroughs of NYC, so doing an analysis of that variable instead allowed for me to not draw conclusions about demographics. 
+
+An additional source of bias in this dataset is that these are records of shootings that are on file with the NYPD, but not every shooting is necessarily recorded. Thus, any conclusions drawn about gun violence in NYC from this dataset would have to be caveated by a guaranteed set of missing data, and speculation about the data that is missing, which could lead to more bias in the analysis. 
