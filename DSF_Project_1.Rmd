@@ -16,6 +16,12 @@ https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD
 
 ## Load Packages
 ```{r packages}
+
+if (!require("data.table", character.only = TRUE)) {
+  install.packages("data.table", dependencies = TRUE)
+  library("data.table", character.only = TRUE)
+ }
+
 library(data.table)
 library(tidyverse)
 ```
